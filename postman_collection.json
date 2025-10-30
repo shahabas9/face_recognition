@@ -1,0 +1,261 @@
+{
+  "info": {
+    "name": "Face Recognition API",
+    "description": "Person Identification System with IP Webcam Support",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "1"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "value",
+        "value": "testkey123",
+        "type": "string"
+      },
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "health"]
+            }
+          }
+        },
+        {
+          "name": "System Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "status"]
+            }
+          }
+        },
+        {
+          "name": "Update Threshold",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/threshold?threshold=0.65",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "threshold"],
+              "query": [
+                {
+                  "key": "threshold",
+                  "value": "0.65"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reload Persons",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/reload_persons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "reload_persons"]
+            }
+          }
+        },
+        {
+          "name": "Cleanup Snapshots",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/cleanup_snapshots?max_age_days=7",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "cleanup_snapshots"],
+              "query": [
+                {
+                  "key": "max_age_days",
+                  "value": "7"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Enrollment",
+      "item": [
+        {
+          "name": "Enroll Person",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "Mohamed Shahabas",
+                  "type": "text"
+                },
+                {
+                  "key": "person_id",
+                  "value": "P001",
+                  "type": "text"
+                },
+                {
+                  "key": "department",
+                  "value": "Engineering",
+                  "type": "text"
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/enroll_person",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "enroll_person"]
+            }
+          }
+        },
+        {
+          "name": "List All Persons",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/persons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "persons"]
+            }
+          }
+        },
+        {
+          "name": "Get Person by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/person/P001",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "person", "P001"]
+            }
+          }
+        },
+        {
+          "name": "Delete Person",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/person/P001",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "person", "P001"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Identification",
+      "item": [
+        {
+          "name": "Identify Image (Multipart)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "camera_id",
+                  "value": "mobile-test-1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/identify_image",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "identify_image"]
+            }
+          }
+        },
+        {
+          "name": "Identify Image (Base64)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image_b64",
+                  "value": "<base64_encoded_image_string>",
+                  "type": "text"
+                },
+                {
+                  "key": "camera_id",
+                  "value": "mobile-test-1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/identify_image",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "identify_image"]
+            }
+          }
+        },
+        {
+          "name": "Test Endpoint",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/test",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "test"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ]
+}

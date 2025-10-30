@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: face_recognition_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: face_recognition
+      MYSQL_USER: 2cloud
+      MYSQL_PASSWORD: shahabas@2cloud
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Face Recognition API
+  api:
+    build: .
+    container_name: face_recognition_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_KEY=testkey123
+      - REQUIRE_AUTH=true
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=2cloud
+      - MYSQL_PASSWORD=shahabas@2cloud
+      - MYSQL_DB=face_recognition
+      - RECOGNITION_THRESHOLD=0.6
+      - FORCE_CPU=true
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./snapshots:/app/snapshots
+      - ./logs:/app/logs
+      - ./config:/app/config
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Waiting for MySQL to be ready...' &&
+        sleep 10 &&
+        python main.py
+      "
+
+volumes:
+  mysql_data:
