@@ -73,19 +73,8 @@ async def lifespan(app: FastAPI):
     # Initialize services
     global face_service, storage_service, webcam_manager
     
-    # Initialize liveness detection first
-    from config.settings import ENABLE_LIVENESS
-    if ENABLE_LIVENESS:
-        print("🔒 Initializing Liveness Detection (Megatron + Pikachu)...")
-        from app.services.liveness_service import liveness_service
-        try:
-            liveness_service.initialize()
-            print("✅ Liveness Detection Ready")
-        except Exception as e:
-            print(f"⚠️  Liveness initialization failed: {e}")
-            print("   Continuing without liveness detection...")
-    else:
-        print("⚠️  Liveness detection disabled in config")
+    
+    
     
     print("🔧 Initializing Face Recognition Service...")
     face_service = FaceRecognitionService()
@@ -383,9 +372,20 @@ async def test_interface():
                 font-weight: 600;
                 cursor: pointer;
                 margin-right: 10px;
+                margin-bottom: 10px;
             }
             button:hover {
                 background: #5a67d8;
+            }
+            button:disabled {
+                background: #cbd5e0;
+                cursor: not-allowed;
+            }
+            .btn-secondary {
+                background: #718096;
+            }
+            .btn-secondary:hover {
+                background: #4a5568;
             }
             .response {
                 margin-top: 30px;
@@ -439,6 +439,37 @@ async def test_interface():
             .tab-content.active {
                 display: block;
             }
+            
+            /* Webcam styles */
+            .webcam-container {
+                margin-top: 10px;
+                background: #000;
+                border-radius: 8px;
+                overflow: hidden;
+                width: 100%;
+                max-width: 640px;
+                position: relative;
+            }
+            video {
+                width: 100%;
+                display: block;
+            }
+            .thumbnails {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-top: 15px;
+            }
+            .thumbnail {
+                width: 100px;
+                height: 100px;
+                object-fit: cover;
+                border-radius: 6px;
+                border: 2px solid #e2e8f0;
+            }
+            .thumbnail.captured {
+                border-color: #48bb78;
+            }
         </style>
     </head>
     <body>
@@ -488,12 +519,23 @@ async def test_interface():
                         <label>Department (optional)</label>
                         <input type="text" id="department" placeholder="e.g., Engineering">
                     </div>
+                    
                     <div class="form-group">
-                        <label>Upload Face Image * (must be a real face)</label>
-                        <input type="file" id="enroll_image" accept="image/*" required onchange="previewImage(this, 'enrollPreview')">
-                        <img id="enrollPreview" style="display:none;max-width:400px;margin-top:15px;border-radius:6px;">
+                        <label>Capture Face Images (5 required) *</label>
+                        <div class="webcam-controls">
+                            <button type="button" class="btn-secondary" onclick="startCamera()">📷 Start Camera</button>
+                            <button type="button" id="captureBtn" onclick="captureImages()" disabled>📸 Capture 5 Images</button>
+                        </div>
+                        
+                        <div class="webcam-container" id="webcamContainer" style="display:none;">
+                            <video id="video" autoplay playsinline></video>
+                        </div>
+                        
+                        <div class="thumbnails" id="thumbnails"></div>
+                        <canvas id="canvas" style="display:none;"></canvas>
                     </div>
-                    <button type="submit">✅ Enroll Person</button>
+                    
+                    <button type="submit" id="enrollBtn" disabled>✅ Enroll Person</button>
                 </form>
                 
                 <div id="enrollResponse" class="response"></div>
@@ -501,6 +543,9 @@ async def test_interface():
         </div>
         
         <script>
+            let capturedBlobs = [];
+            let stream = null;
+
             function showTab(tab) {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -519,6 +564,60 @@ async def test_interface():
                     };
                     reader.readAsDataURL(input.files[0]);
                 }
+            }
+            
+            async function startCamera() {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    const video = document.getElementById('video');
+                    video.srcObject = stream;
+                    document.getElementById('webcamContainer').style.display = 'block';
+                    document.getElementById('captureBtn').disabled = false;
+                } catch (err) {
+                    alert("Error accessing camera: " + err.message);
+                }
+            }
+            
+            async function captureImages() {
+                const video = document.getElementById('video');
+                const canvas = document.getElementById('canvas');
+                const thumbnails = document.getElementById('thumbnails');
+                const context = canvas.getContext('2d');
+                
+                capturedBlobs = [];
+                thumbnails.innerHTML = '';
+                
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                document.getElementById('captureBtn').disabled = true;
+                document.getElementById('captureBtn').innerText = "Capturing...";
+                
+                for (let i = 0; i < 5; i++) {
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    // Create thumbnail
+                    const thumb = document.createElement('img');
+                    thumb.src = canvas.toDataURL('image/jpeg');
+                    thumb.className = 'thumbnail captured';
+                    thumbnails.appendChild(thumb);
+                    
+                    // Save blob
+                    await new Promise(resolve => canvas.toBlob(blob => {
+                        capturedBlobs.push(blob);
+                        resolve();
+                    }, 'image/jpeg'));
+                    
+                    // Wait 3 seconds before next capture
+                    if (i < 4) {
+                        document.getElementById('captureBtn').innerText = `Capturing... (${i+1}/5) - Wait 3s`;
+                        await new Promise(r => setTimeout(r, 3000));
+                    }
+                }
+                
+                document.getElementById('captureBtn').innerText = "📸 Retake Images";
+                document.getElementById('captureBtn').disabled = false;
+                document.getElementById('enrollBtn').disabled = false;
             }
             
             async function identifyPerson(event) {
@@ -592,6 +691,11 @@ async def test_interface():
             async function enrollPerson(event) {
                 event.preventDefault();
                 
+                if (capturedBlobs.length < 5) {
+                    alert("Please capture 5 images first!");
+                    return;
+                }
+                
                 const responseDiv = document.getElementById('enrollResponse');
                 responseDiv.style.display = 'block';
                 responseDiv.className = 'response';
@@ -599,7 +703,11 @@ async def test_interface():
                 
                 const formData = new FormData();
                 formData.append('name', document.getElementById('name').value);
-                formData.append('image', document.getElementById('enroll_image').files[0]);
+                
+                // Append all captured images
+                capturedBlobs.forEach((blob, index) => {
+                    formData.append('images', blob, `capture_${index}.jpg`);
+                });
                 
                 const personId = document.getElementById('person_id').value;
                 if (personId) formData.append('person_id', personId);
@@ -634,7 +742,9 @@ async def test_interface():
                         
                         // Reset form
                         document.getElementById('enrollForm').reset();
-                        document.getElementById('enrollPreview').style.display = 'none';
+                        document.getElementById('thumbnails').innerHTML = '';
+                        capturedBlobs = [];
+                        document.getElementById('enrollBtn').disabled = true;
                     } else {
                         responseDiv.className = 'response error';
                         responseDiv.innerHTML = `

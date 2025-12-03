@@ -32,7 +32,7 @@ class Person(Base):
     id = Column(Integer, primary_key=True, index=True)
     person_id = Column(String(100), unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=False)
-    face_embedding = Column(Text, nullable=False)  # JSON string of embedding vector
+    face_embedding = Column(Text, nullable=False)  # JSON string of embedding vector (or list of vectors)
     department = Column(String(255))
     extra_info = Column(Text)  # Additional JSON metadata
     is_active = Column(Boolean, default=True)

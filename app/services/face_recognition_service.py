@@ -1,3 +1,4 @@
+# app/services/face_recognition_service.py
 """
 Face Recognition Service using FaceNet and MTCNN
 Handles face detection, embedding extraction, and person identification.
@@ -18,7 +19,12 @@ from config.settings import (
     MIN_FACE_SIZE,
     DETECTION_CONFIDENCE,
     get_device,
-    ENABLE_LIVENESS
+    FACE_REAL_WIDTH_M,
+    FACE_FOCAL_LENGTH_PX,
+    FACE_DISTANCE_MIN_M,
+    FACE_DISTANCE_MAX_M,
+    FACE_DISTANCE_ALERT_M,
+    ENABLE_FACE_DISTANCE_GATING,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +53,12 @@ class FaceRecognitionService:
         logger.info("✅ FaceNet embedding model loaded (VGGFace2)")
         
         self.recognition_threshold = RECOGNITION_THRESHOLD
+        self.face_real_width_m = FACE_REAL_WIDTH_M
+        self.face_focal_length_px = FACE_FOCAL_LENGTH_PX
+        self.distance_min_m = FACE_DISTANCE_MIN_M
+        self.distance_max_m = FACE_DISTANCE_MAX_M
+        self.distance_alert_m = FACE_DISTANCE_ALERT_M
+        self.distance_gating_enabled = ENABLE_FACE_DISTANCE_GATING
         
         # Cache for person embeddings
         self.person_embeddings: List[np.ndarray] = []
@@ -77,22 +89,49 @@ class FaceRecognitionService:
                 try:
                     # Deserialize embedding from JSON
                     embedding_data = json.loads(person.face_embedding)
-                    embedding = np.array(embedding_data, dtype=np.float32)
                     
-                    self.person_embeddings.append(embedding)
-                    self.person_ids.append(person.person_id)
-                    self.person_names.append(person.name)
+                    # Handle both single embedding (list) and multiple embeddings (list of lists)
+                    if not embedding_data:
+                        continue
+                        
+                    # Check if it's a list of lists (multiple embeddings)
+                    if isinstance(embedding_data[0], list):
+                        for emb_list in embedding_data:
+                            embedding = np.array(emb_list, dtype=np.float32)
+                            self.person_embeddings.append(embedding)
+                            self.person_ids.append(person.person_id)
+                            self.person_names.append(person.name)
+                    else:
+                        # Single embedding (legacy support)
+                        embedding = np.array(embedding_data, dtype=np.float32)
+                        self.person_embeddings.append(embedding)
+                        self.person_ids.append(person.person_id)
+                        self.person_names.append(person.name)
+                        
                 except Exception as e:
                     logger.error(f"Error loading person {person.name}: {e}")
             
             if should_close:
                 db.close()
             
-            logger.info(f"✅ Loaded {len(self.person_embeddings)} persons into cache")
+            logger.info(f"✅ Loaded {len(self.person_embeddings)} face embeddings into cache")
             
         except Exception as e:
             logger.error(f"❌ Error loading persons from database: {e}")
-    
+
+    def estimate_distance(self, bounding_box: List[int]) -> Optional[float]:
+        """Estimate face distance from camera using bounding box width."""
+        try:
+            if not bounding_box or len(bounding_box) < 4:
+                return None
+            _, _, width_px, _ = bounding_box
+            if width_px <= 0:
+                return None
+            return (self.face_real_width_m * self.face_focal_length_px) / float(width_px)
+        except Exception as exc:
+            logger.debug(f"Error estimating face distance: {exc}")
+            return None
+
     def detect_faces(self, image: Image.Image) -> Optional[List[Tuple[np.ndarray, List[int]]]]:
         """
         Detect faces in image and return face regions with bounding boxes.
@@ -141,7 +180,6 @@ class FaceRecognitionService:
             logger.error(f"Error detecting faces: {e}")
             return None
 
-    
     def get_face_embedding(
         self,
         image: Image.Image,
@@ -198,7 +236,7 @@ class FaceRecognitionService:
         except Exception as e:
             logger.error(f"Error extracting face embedding: {e}")
             return None
-    
+
     def identify_person(
         self,
         image: Image.Image,
@@ -226,30 +264,6 @@ class FaceRecognitionService:
             logger.warning("No persons enrolled in system")
             return None
         try:
-            # Convert PIL Image to numpy array for liveness check
-            image_np = np.array(image)
-            
-            # Check liveness if enabled
-            if ENABLE_LIVENESS:
-                from .liveness_service import liveness_service
-                
-                # Check if liveness service is initialized
-                if not liveness_service.initialized:
-                    logger.error("❌ Liveness service not initialized! Call liveness_service.initialize() first.")
-                    logger.error("   Continuing without liveness check...")
-                else:
-                    liveness_result = liveness_service.check_liveness(image_np)
-                    
-                    if not liveness_result.get('is_live', False):
-                        logger.warning(
-                            f"Liveness check failed (score: {liveness_result.get('confidence', 0):.3f} < "
-                            f"{liveness_result.get('threshold', 0.7)})"
-                        )
-                        return {
-                            'error': 'Liveness check failed',
-                            'liveness': liveness_result
-                        }
-            
             # Detect faces and get bounding box
             faces = pre_detected_faces if pre_detected_faces is not None else self.detect_faces(image)
             
@@ -259,6 +273,20 @@ class FaceRecognitionService:
             
             # Use the first face
             face_img, bbox = faces[0]
+            distance_m = self.estimate_distance(bbox)
+            within_range = True
+            if distance_m is not None:
+                within_range = self.distance_min_m <= distance_m <= self.distance_max_m
+                if self.distance_gating_enabled and not within_range:
+                    logger.debug(
+                        "Face detected but distance %.3fm outside configured range %.3f-%.3fm",
+                        distance_m,
+                        self.distance_min_m,
+                        self.distance_max_m,
+                    )
+                    return None
+            elif self.distance_gating_enabled:
+                logger.debug("Face detected but distance could not be estimated; proceeding without gating")
             
             # Get embedding for detected face
             face_img_resized = face_img.resize((160, 160))
@@ -300,11 +328,11 @@ class FaceRecognitionService:
                 
                 if return_bbox:
                     result['bounding_box'] = bbox
-                
-                # Add liveness info if enabled
-                if ENABLE_LIVENESS:
-                    result['liveness'] = liveness_result
-                
+                if distance_m is not None:
+                    result['distance_m'] = float(distance_m)
+                    result['distance_within_range'] = within_range
+                    result['distance_alert'] = distance_m <= self.distance_alert_m
+
                 logger.info(
                     f"✅ IDENTIFIED: {result['name']} "
                     f"(confidence: {best_similarity:.3f}) | "
@@ -322,52 +350,185 @@ class FaceRecognitionService:
             logger.error(f"Error in person identification: {e}", exc_info=True)
             return None
     
-    def enroll_person(
+    def identify_all_persons(
         self,
         image: Image.Image,
+        return_bbox: bool = False,
+        pre_detected_faces: Optional[List[Tuple[Image.Image, List[int]]]] = None
+    ) -> List[Dict]:
+        """
+        Identify all persons in image
+        
+        Args:
+            image: PIL Image containing faces
+            return_bbox: Whether to include bounding box in results
+            pre_detected_faces: Optional pre-detected faces to use
+        
+        Returns:
+            List of dicts with identification results, one per detected face
+            Each dict contains:
+            {
+                'person_id': str,
+                'name': str,
+                'confidence': float,
+                'embedding_distance': float,
+                'bounding_box': [x, y, w, h] (optional),
+                'distance_m': float (optional),
+                'distance_within_range': bool (optional),
+                'distance_alert': bool (optional)
+            }
+            Returns empty list if no persons identified
+        """
+        if not self.person_embeddings:
+            logger.warning("No persons enrolled in system")
+            return []
+        
+        results = []
+        
+        try:
+            # Detect all faces
+            faces = pre_detected_faces if pre_detected_faces is not None else self.detect_faces(image)
+            
+            if faces is None or len(faces) == 0:
+                logger.debug("No faces detected in image")
+                return []
+            
+            logger.debug(f"Processing {len(faces)} detected face(s)")
+            
+            # Process each detected face
+            for face_idx, (face_img, bbox) in enumerate(faces):
+                # Check distance gating
+                distance_m = self.estimate_distance(bbox)
+                within_range = True
+                
+                if distance_m is not None:
+                    within_range = self.distance_min_m <= distance_m <= self.distance_max_m
+                    if self.distance_gating_enabled and not within_range:
+                        logger.debug(
+                            f"Face {face_idx+1} at distance {distance_m:.3f}m outside range "
+                            f"{self.distance_min_m:.3f}-{self.distance_max_m:.3f}m, skipping"
+                        )
+                        continue
+                elif self.distance_gating_enabled:
+                    logger.debug(f"Face {face_idx+1}: distance could not be estimated; proceeding without gating")
+                
+                # Get embedding for detected face
+                face_img_resized = face_img.resize((160, 160))
+                face_array = np.array(face_img_resized)
+                
+                if len(face_array.shape) == 2:
+                    face_array = np.stack([face_array] * 3, axis=-1)
+                elif face_array.shape[2] == 4:
+                    face_array = face_array[:, :, :3]
+                
+                face_tensor = torch.tensor(face_array).permute(2, 0, 1).float()
+                face_tensor = (face_tensor - 127.5) / 128.0
+                face_tensor = face_tensor.unsqueeze(0)
+                
+                with torch.no_grad():
+                    current_embedding = self.facenet(face_tensor).cpu().numpy().flatten()
+                
+                # Compare with all enrolled persons
+                current_embedding = current_embedding.reshape(1, -1)
+                person_embeddings = np.array(self.person_embeddings)
+                
+                # Calculate cosine similarities
+                similarities = cosine_similarity(current_embedding, person_embeddings)[0]
+                
+                # Find best match
+                best_idx = np.argmax(similarities)
+                best_similarity = similarities[best_idx]
+                
+                # Calculate distance (1 - similarity for cosine)
+                embedding_distance = 1.0 - best_similarity
+                
+                if best_similarity >= self.recognition_threshold:
+                    result = {
+                        'person_id': self.person_ids[best_idx],
+                        'name': self.person_names[best_idx],
+                        'confidence': float(best_similarity),
+                        'embedding_distance': float(embedding_distance)
+                    }
+                    
+                    if return_bbox:
+                        result['bounding_box'] = bbox
+                    if distance_m is not None:
+                        result['distance_m'] = float(distance_m)
+                        result['distance_within_range'] = within_range
+                        result['distance_alert'] = distance_m <= self.distance_alert_m
+                    
+                    results.append(result)
+                    
+                    logger.info(
+                        f"✅ IDENTIFIED ({face_idx+1}/{len(faces)}): {result['name']} "
+                        f"(confidence: {best_similarity:.3f}) | "
+                        f"Distance: {embedding_distance:.4f}"
+                    )
+                else:
+                    logger.debug(
+                        f"Face {face_idx+1} detected but confidence too low: {best_similarity:.3f} "
+                        f"< {self.recognition_threshold}"
+                    )
+            
+            return results
+        
+        except Exception as e:
+            logger.error(f"Error in multi-person identification: {e}", exc_info=True)
+            return []
+
+    
+    def enroll_person(
+        self,
+        images: List[Image.Image],
         person_id: str,
         name: str,
         db: Session,
-        pre_detected_faces: Optional[List[Tuple[Image.Image, List[int]]]] = None
-    ) -> Tuple[bool, str, Optional[np.ndarray]]:
+    ) -> Tuple[bool, str, Optional[List[np.ndarray]]]:
         """
-        Enroll a new person
+        Enroll a new person with multiple images
         
         Args:
-            image: PIL Image containing person's face
+            images: List of PIL Images containing person's face
             person_id: Unique person identifier
             name: Person's name
             db: Database session
             
         Returns:
-            (success: bool, message: str, embedding: Optional[np.ndarray])
+            (success: bool, message: str, embeddings: Optional[List[np.ndarray]])
         """
         try:
-            # Detect faces first
-            faces = self.detect_faces(image)
-            if faces is None or len(faces) == 0:
-                return False, "No face detected in image", None
-            
-            # Extract face embedding
-            embedding = self.get_face_embedding(image, pre_detected_faces=faces)
-            
-            if embedding is None:
-                return False, "Failed to extract face embedding", None
-            
             # Check if person_id already exists
             existing = db.query(Person).filter(Person.person_id == person_id).first()
             if existing:
                 return False, f"Person ID {person_id} already exists", None
+
+            embeddings = []
+            
+            for i, image in enumerate(images):
+                # Detect faces
+                faces = self.detect_faces(image)
+                if faces is None or len(faces) == 0:
+                    logger.warning(f"No face detected in image {i+1}")
+                    continue
+                
+                # Extract face embedding
+                embedding = self.get_face_embedding(image, pre_detected_faces=faces)
+                
+                if embedding is not None:
+                    embeddings.append(embedding)
+            
+            if not embeddings:
+                return False, "Failed to extract any face embeddings from provided images", None
             
             # All validations passed
             logger.info(
-                f"✅ Enrollment approved for {name}"
+                f"✅ Enrollment approved for {name} with {len(embeddings)} embeddings"
             )
             
             return (
                 True, 
-                "Face embedding created successfully", 
-                embedding
+                f"Created {len(embeddings)} face embeddings successfully", 
+                embeddings
             )
         
         except Exception as e:

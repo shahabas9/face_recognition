@@ -9,8 +9,8 @@ IP_WEBCAM_SOURCES = {
         "name": "Mobile Phone - Main Entrance",
         "enabled": True,
         # IP Webcam app default URL formats:
-        "mjpeg_url": "http://192.168.1.108:8080/video",  # MJPEG stream
-        "rtsp_url": "rtsp://192.168.1.108:8080/h264_ulaw.sdp",  # RTSP stream (if available)
+        "mjpeg_url": "http://192.168.68.106:8080/video",  # MJPEG stream
+        "rtsp_url": "rtsp://192.168.68.106:8080/h264_ulaw.sdp",  # RTSP stream (if available)
         "camera_id": "mobile-entrance-1",
         "location": "Main Entrance",
         # Stream settings

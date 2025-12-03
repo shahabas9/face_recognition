@@ -155,9 +155,15 @@ async def identify_image(
                     base_url=str(request.base_url).rstrip('/')
                 )
         
-        # Extract liveness info if available
+        # Extract liveness and distance info if available
         liveness_info = result.get('liveness') if result else None
         liveness_score = liveness_info.get('confidence') if liveness_info else None
+        distance_m = result.get('distance_m') if result else None
+        distance_within_range = result.get('distance_within_range') if result else None
+        distance_alert = result.get('distance_alert') if result else None
+        spoofing_detected = result.get('spoofing_detected', False) if result else False
+        spoofing_reason = result.get('spoofing_reason') if result else None
+        spoofing_details = result.get('spoofing_details') if result else None
         
         # Create detection event
         event = DetectionEvent(
@@ -171,10 +177,10 @@ async def identify_image(
             timestamp=datetime.utcnow(),
             client_ip=request.client.host if request.client else None,
             request_source='api',
-            spoofing_detected=False,
-            spoofing_reason=None,
+            spoofing_detected=spoofing_detected,
+            spoofing_reason=spoofing_reason,
             liveness_score=liveness_score,
-            spoofing_type=None
+            spoofing_type=result.get('spoofing_type') if result else None
         )
 
         db.add(event)
@@ -188,9 +194,12 @@ async def identify_image(
             bounding_box=result.get('bounding_box') if result else None,
             snapshot_url=snapshot_url,
             liveness=liveness_info,
-            spoofing_detected=False,
-            spoofing_reason=None,
-            spoofing_details=None
+            spoofing_detected=spoofing_detected,
+            spoofing_reason=spoofing_reason,
+            spoofing_details=spoofing_details,
+            distance_m=distance_m,
+            distance_within_range=distance_within_range,
+            distance_alert=distance_alert
         )
 
         response_time = (time.time() - start_time) * 1000

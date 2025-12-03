@@ -8,7 +8,7 @@ import io
 import logging
 from datetime import datetime
 from PIL import Image
-from typing import Optional
+from typing import Optional, List
 
 from app.core.security import verify_api_key
 from app.models import get_db, Person, get_next_person_id
@@ -41,19 +41,19 @@ async def enroll_person(
     person_id: Optional[str] = Form(None),
     department: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
-    image: UploadFile = File(...),
+    images: List[UploadFile] = File(...),
     api_key: str = Depends(verify_api_key),
     db: Session = Depends(get_db)
 ):
     """
-    Enroll a new person in the system
+    Enroll a new person in the system with multiple images (recommended: 5)
     
     **Request:**
     - **name**: Person's full name (required)
     - **person_id**: Unique ID (optional, auto-generated if not provided)
     - **department**: Department or group (optional)
     - **metadata**: Additional JSON metadata (optional)
-    - **image**: Face image file (required)
+    - **images**: List of face image files (required)
     
     **Example curl:**
     ```bash
@@ -62,13 +62,23 @@ async def enroll_person(
          -F "name=Mohamed Shahabas" \\
          -F "person_id=P001" \\
          -F "department=Engineering" \\
-         -F "image=@person_photo.jpg"
+         -F "images=@photo1.jpg" \\
+         -F "images=@photo2.jpg" \\
+         -F "images=@photo3.jpg" \\
+         -F "images=@photo4.jpg" \\
+         -F "images=@photo5.jpg"
     ```
     """
     try:
-        # Read and process image
-        image_data = await image.read()
-        pil_image = Image.open(io.BytesIO(image_data)).convert('RGB')
+        if not images:
+             raise HTTPException(status_code=400, detail="No images provided")
+
+        # Read and process images
+        pil_images = []
+        for image in images:
+            image_data = await image.read()
+            pil_image = Image.open(io.BytesIO(image_data)).convert('RGB')
+            pil_images.append(pil_image)
         
         # Generate person_id if not provided
         if not person_id:
@@ -83,9 +93,9 @@ async def enroll_person(
                 detail=f"Person ID '{person_id}' already exists"
             )
         
-        # Enroll person (extract embedding)
-        success, message, embedding = face_service.enroll_person(
-            pil_image,
+        # Enroll person (extract embeddings)
+        success, message, embeddings = face_service.enroll_person(
+            pil_images,
             person_id,
             name,
             db
@@ -94,16 +104,20 @@ async def enroll_person(
         if not success:
             raise HTTPException(status_code=400, detail=message)
         
-        # Save snapshot
-        snapshot_rel_path, snapshot_full_path = storage_service.save_snapshot(
-            pil_image,
-            prefix="enroll",
-            person_id=person_id,
-            subdirectory="enrollments"
-        )
+        # Save snapshots
+        snapshot_saved = False
+        for i, pil_image in enumerate(pil_images):
+            snapshot_rel_path, snapshot_full_path = storage_service.save_snapshot(
+                pil_image,
+                prefix=f"enroll_{i+1}",
+                person_id=person_id,
+                subdirectory="enrollments"
+            )
+            if snapshot_rel_path:
+                snapshot_saved = True
         
-        # Serialize embedding
-        embedding_json = json.dumps(embedding.tolist())
+        # Serialize embeddings (list of lists)
+        embeddings_json = json.dumps([emb.tolist() for emb in embeddings])
         
         # Parse metadata if provided
         metadata_dict = None
@@ -118,7 +132,7 @@ async def enroll_person(
         person = Person(
             person_id=person_id,
             name=name,
-            face_embedding=embedding_json,
+            face_embedding=embeddings_json,
             department=department,
             metadata=json.dumps(metadata_dict) if metadata_dict else None,
             is_active=True,
@@ -132,15 +146,15 @@ async def enroll_person(
         # Reload persons in face service
         face_service.load_persons(db)
         
-        logger.info(f"✅ Enrolled new person: {name} ({person_id})")
+        logger.info(f"✅ Enrolled new person: {name} ({person_id}) with {len(embeddings)} embeddings")
         
         return EnrollPersonResponse(
             status="ok",
             person_id=person_id,
             name=name,
-            message=f"Successfully enrolled {name}",
+            message=f"Successfully enrolled {name} with {len(embeddings)} face samples",
             embedding_created=True,
-            snapshot_saved=(snapshot_rel_path != "")
+            snapshot_saved=snapshot_saved
         )
     
     except HTTPException:
