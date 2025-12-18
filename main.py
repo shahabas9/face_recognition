@@ -34,7 +34,7 @@ from app.services import (
     IPWebcamManager,
 )
 from app.api.v1 import api_router
-from app.api.v1.endpoints import identify, enroll, system
+from app.api.v1.endpoints import identify, enroll_old as enroll, enroll_s3, system
 
 # Configure logging
 logging.basicConfig(
@@ -88,6 +88,7 @@ async def lifespan(app: FastAPI):
     # Inject services into API endpoints
     identify.set_services(face_service, storage_service)
     enroll.set_services(face_service, storage_service)
+    enroll_s3.set_services(face_service, storage_service)
     system.set_services(face_service, storage_service, webcam_manager)
     
     # Start webcam processors

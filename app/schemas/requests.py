@@ -14,6 +14,14 @@ class EnrollPersonRequest(BaseModel):
     metadata: Optional[dict] = Field(None, description="Additional metadata as JSON")
 
 
+class EnrollS3Request(BaseModel):
+    name: str = Field(..., description="Full name of the person")
+    department: Optional[str] = Field(None, description="Department or group")
+    image_urls: List[str] = Field(..., description="List of 5 S3 image URLs")
+    person_id: Optional[str] = Field(None, description="Unique person ID (auto-generated if not provided)")
+    metadata: Optional[dict] = Field(None, description="Additional metadata as JSON")
+
+
 class IdentifyImageRequest(BaseModel):
     image_b64: str = Field(..., description="Base64-encoded image")
     camera_id: Optional[str] = Field("mobile-test-1", description="Camera/source identifier")
@@ -58,6 +66,13 @@ class EnrollPersonResponse(BaseModel):
     embedding_created: bool = Field(..., description="Whether face embedding was successfully created")
     snapshot_saved: bool = Field(..., description="Whether snapshot was saved")
     processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
+
+
+class EnrollS3Response(BaseModel):
+    """Response for S3 person enrollment"""
+    status: str = "ok"
+    face_uuid: str = Field(..., description="Enrolled person UUID")
+    name: str = Field(..., description="Enrolled person name")
 
 
 class DetectionEventResponse(BaseModel):

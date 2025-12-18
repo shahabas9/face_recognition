@@ -104,7 +104,7 @@ logs/
 *.avi
 
 # Environments
-# .env
+.env
 .venv
 env/
 venv/
@@ -189,3 +189,6 @@ test_video.mp4
 # Credentials
 credentials.json
 secrets.json
+snapshots/
+logs/
+__pycache__
